@@ -1,0 +1,7 @@
+{
+  "fixture_id": "checkout-empty-cart",
+  "expected_failing_test": "tests/test_checkout.py::test_empty_cart_returns_zero",
+  "allowed_test_command": ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
+  "expected_passed": 3,
+  "expected_failed": 1
+}

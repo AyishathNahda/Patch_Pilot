@@ -1,0 +1,34 @@
+"use client";
+
+import { useState } from "react";
+import type { DebugReport, Evidence } from "@/lib/api";
+import { Icon } from "./icon";
+
+const titles: Record<string, string> = { tests_passed: "Tests passed", tests_failed: "Tests failed", timeout: "Execution timed out", infrastructure_failure: "Infrastructure unavailable", verified: "Patch verified", verification_failed: "Patch not verified", blocked_execution: "Execution blocked", baseline_unexpected: "Unexpected baseline", provider_error: "Model provider unavailable", patch_rejected: "Candidate rejected" };
+export function Status({ value }: { value: string }) {
+  const tone = ["verified", "tests_passed"].includes(value) ? "success" : ["tests_failed", "baseline_unexpected"].includes(value) ? "warning" : "danger";
+  return <span className={`badge ${tone}`}><span className="status-dot" />{titles[value] || value}</span>;
+}
+export function DiffView({ diff }: { diff: string }) {
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const path = diff.match(/^\+\+\+ b\/(.+)$/m)?.[1] ?? "Candidate source";
+  return <div className="diff-view"><div className="code-toolbar"><span><Icon name="code" size={15} />{path}</span><button className="text-button" onClick={async () => { try { await navigator.clipboard.writeText(diff); setCopied(true); setCopyError(false); } catch { setCopyError(true); } }}>{copied ? "Copied" : "Copy diff"}</button></div>{copyError && <p role="status" className="error-text">Clipboard unavailable. Select and copy the diff below.</p>}<pre className="diff-code" tabIndex={0} aria-label="Candidate unified diff"><code>{diff.split("\n").map((line, index) => <span className={`diff-line ${line.startsWith("+++") || line.startsWith("---") ? "diff-file" : line.startsWith("+") ? "diff-add" : line.startsWith("-") ? "diff-remove" : line.startsWith("@@") ? "diff-hunk" : ""}`} key={index}><span className="line-counter" aria-hidden="true">{index + 1}</span>{line || " "}{"\n"}</span>)}</code></pre></div>;
+}
+export function EvidenceView({ evidence, title, open = false }: { evidence: Evidence | null | undefined; title: string; open?: boolean }) {
+  if (!evidence) return <div className="unexecuted"><Icon name="terminal" size={17} /><span>{title}</span><span className="muted">Not executed</span></div>;
+  return <details className="evidence panel" open={open}><summary><span className="evidence-title"><Icon name="terminal" />{title}</span><span className="evidence-summary"><span className="mono small muted">{evidence.duration_seconds.toFixed(2)}s</span><Status value={evidence.status} /></span></summary><div className="evidence-body"><div className="evidence-meta"><div><span>Exit code</span><strong className="mono">{evidence.exit_code ?? "Unavailable"}</strong></div><div><span>Started at (UTC)</span><strong className="mono small">{evidence.started_at}</strong></div><div><span>Execution timeout</span><strong>{evidence.timed_out ? "Yes" : "No"}</strong></div></div><p className="field-caption">EXACT TEST COMMAND</p><pre className="command" tabIndex={0}><code>{evidence.test_command.join(" ")}</code></pre>{evidence.error && <div className="error-banner">{evidence.error}</div>}<p className="field-caption">STDOUT{evidence.stdout_truncated ? " · TRUNCATED" : ""}</p><pre className="log-output" tabIndex={0}><code>{evidence.stdout || "No stdout captured."}</code></pre><p className="field-caption">STDERR{evidence.stderr_truncated ? " · TRUNCATED" : ""}</p><pre className="log-output stderr" tabIndex={0}><code>{evidence.stderr || "No stderr captured."}</code></pre><details className="image-details"><summary>Container image</summary><p className="mono small">{evidence.image_reference}</p><p className="mono small break-all">{evidence.container_image_id || "Image not resolved"}</p></details></div></details>;
+}
+export function DebugResults({ report, httpStatus }: { report: DebugReport; httpStatus: number }) {
+  const verified = report.verified === true && report.status === "verified";
+  return <section className="results-section" aria-label="Debug run results"><div className="section-title"><h2>Investigation report</h2><span className="mono small muted">HTTP {httpStatus}</span></div><div className={`result-banner ${verified ? "verified-banner" : "unverified-banner"}`}><span className="result-symbol"><Icon name={verified ? "shield" : "bug"} size={25} /></span><div><h3>{verified ? "Verified against the fixture’s tests" : titles[report.status]}</h3><p>{verified ? "The original failing test and full regression suite passed in the sandbox. Review the evidence below." : report.error || "This run did not produce a verified fix. Review the stage evidence."}</p></div><Status value={report.status} /></div>
+    <div className="report-strip"><span>Fixture <strong className="mono">{report.fixture_id}</strong></span><span>Provider <strong>{report.provider}</strong></span><span>Patch attempts <strong>{report.patch_attempts ?? 0}</strong></span></div>
+    <div className="section-title"><h3>01 <span>Reproduction evidence</span></h3></div><EvidenceView evidence={report.baseline} title="Original failing baseline" open />
+    <div className="section-title"><h3>02 <span>AI investigation</span></h3><span className="tiny-label">HYPOTHESIS · NOT PROOF</span></div>
+    {report.candidate ? <div className="panel investigation"><p>{report.candidate.hypothesis}</p><div className="references">{report.candidate.references.map((ref, index) => <div key={index}><span className="source-reference"><Icon name="code" size={14} />{ref.path}:{ref.line}</span><code>{ref.quote}</code></div>)}</div></div> : <div className="empty-stage">No model candidate was returned. Check the run status and baseline evidence.</div>}
+    <div className="section-title"><h3>03 <span>Candidate patch</span></h3><span className="tiny-label">DISPOSABLE COPY ONLY</span></div>
+    {report.candidate ? <><DiffView diff={report.candidate.unified_diff} />{report.model_unified_diff && report.model_unified_diff !== report.candidate.unified_diff && <details className="raw-diff"><summary>View original model diff before canonicalization</summary><DiffView diff={report.model_unified_diff} /></details>}</> : <div className="empty-stage">No candidate diff available.</div>}
+    <div className="section-title"><h3>04 <span>Verification</span></h3></div><div className="evidence-stack"><EvidenceView evidence={report.failing_test} title="Original failing test · after patch" /><EvidenceView evidence={report.regression} title="Full regression suite · after patch" open /></div>
+    {report.source_sha256 && Object.keys(report.source_sha256).length > 0 && <details className="hashes"><summary>Source snapshot SHA256 hashes</summary>{Object.entries(report.source_sha256).map(([path, hash]) => <p key={path}><strong>{path}</strong><code>{hash}</code></p>)}</details>}
+  </section>;
+}
